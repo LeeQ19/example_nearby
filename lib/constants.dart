@@ -4,5 +4,6 @@ class Constants {
   static String disabledDiscovering = 'Discovering Disabled';
   static String running = 'Running...';
   static String stopping = 'Stoping...';
+  static String unknown = 'Unknown';
   static String noDevice = 'No Device Discovered';
 }

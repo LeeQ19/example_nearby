@@ -1,7 +1,10 @@
 import 'dart:async';
+import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:example_nearby/constants.dart';
 import 'package:example_nearby/functions.dart';
+import 'package:flutter_beacon/flutter_beacon.dart';
 import 'package:flutter_ble_peripheral/flutter_ble_peripheral.dart';
 import 'package:flutter_reactive_ble/flutter_reactive_ble.dart';
 import 'package:get/get.dart';
@@ -11,22 +14,14 @@ class NearbyService {
   static final _ble = FlutterReactiveBle();
   static final _blePeripheral = FlutterBlePeripheral();
   static const _serviceId = '9840d77d-4ecf-443f-8175-7b736cc2b263';
+  static const _beaconId = '514a35d3-7e3c-47b4-b657-1b8c4fc5883f';
+  static late AdvertiseData _advertiseData;
+  static final List<Region> _regions = [];
   static StreamSubscription<DiscoveredDevice>? _bleStream;
+  static StreamSubscription<RangingResult>? _beaconStream;
 
-  /// 20 length random string with large, small alphabet & number
-  static final String _uid = getRandomString(20);
-
-  static final AdvertiseData advertiseData = AdvertiseData(
-    serviceUuid: _serviceId,
-    // manufacturerId: null,           //Android only. Specifies a manufacturer id Manufacturer ID assigned by Bluetooth SIG.
-    // manufacturerData: null,         //Android only. Specifies a manufacturer id Manufacturer ID assigned by Bluetooth SIG.
-    // serviceDataUuid: null,          //Android only. Specifies service data UUID.
-    // serviceData: null,              //Android only. Specifies service data.
-    // includeDeviceName: false,       //Android only. Set to true if device name needs to be included with advertisement Default: false
-    // localName: null,                //iOS only. Set the deviceName to be broadcasted. Can be 10 bytes.
-    // includePowerLevel: false,       //Android only. set to true if you want to include the power level in the advertisement Default: false
-    // serviceSolicitationUuid: null,  //Android > SDK 31 only. A service solicitation UUID to advertise data.
-  );
+  /// 28 length random string with large, small alphabet & number
+  static final String _uid = getRandomString(28);
 
   /// Initialize function
   ///
@@ -39,13 +34,44 @@ class NearbyService {
     print('Weve| isSupported: $isSupported');
     final permissionsGranted = await _checkPermissions();
     print('Weve| permissions: $permissionsGranted');
+
+    await flutterBeacon.initializeAndCheckScanning;
+
+    // _advertiseData = AdvertiseData(
+    //   serviceUuid: _serviceId,
+    //   manufacturerId: 0xa1b1, //Android only.
+    //   manufacturerData: Uint8List.fromList([0xab, 0xcd, 0xef]), //Android only.
+    //   serviceDataUuid: _serviceId, //Android only.
+    //   serviceData: [12, 34, 45], //Android only.
+    //   includeDeviceName: true, //Android only.
+    //   localName: _uid, //iOS only.
+    // );
+    // _regions.add(Region(identifier: 'com.beacon', proximityUUID: _beaconId));
+
+    if (Platform.isAndroid) {
+      _advertiseData = AdvertiseData(
+        serviceUuid: _serviceId,
+        manufacturerId: 0xa1b1, //Android only.
+        manufacturerData: Uint8List.fromList([0xab, 0xcd, 0xef]), //Android only.
+        serviceDataUuid: _serviceId, //Android only.
+        serviceData: [12, 34, 45], //Android only.
+        includeDeviceName: true, //Android only.
+      );
+      _regions.add(Region(identifier: 'com.beacon'));
+    } else {
+      _advertiseData = AdvertiseData(
+        serviceUuid: _serviceId,
+        localName: _uid, //iOS only.
+      );
+      _regions.add(Region(identifier: 'com.beacon', proximityUUID: _beaconId));
+    }
   }
 
   /// Check required permissions function
   ///
   /// If any of the permissions are not granted, request the permission.
   /// Return a boolean wheather all permissions are granted or denied.
-  static Future<bool> _checkPermissions() async {
+  static Future<List<bool>> _checkPermissions() async {
     final Map<Permission, PermissionStatus> statuses = await [
       Permission.bluetooth,
       Permission.bluetoothAdvertise,
@@ -53,8 +79,8 @@ class NearbyService {
       Permission.bluetoothScan,
       Permission.location,
     ].request();
-    if (statuses.values.every((status) => status == PermissionStatus.granted)) return true;
-    return false;
+    final granted = statuses.values.map((status) => status == PermissionStatus.granted).toList();
+    return granted;
   }
 
   /// Activate advertising function
@@ -66,7 +92,7 @@ class NearbyService {
     currentDevice.value = Constants.running;
     try {
       await _blePeripheral.start(
-        advertiseData: advertiseData,
+        advertiseData: _advertiseData,
         advertiseSettings: AdvertiseSettings(timeout: 0),
       );
 
@@ -105,11 +131,30 @@ class NearbyService {
       _bleStream = _ble.scanForDevices(
         withServices: [Uuid.parse(_serviceId)],
         requireLocationServicesEnabled: true,
-      ).listen((device) {
+      ).listen((DiscoveredDevice device) {
         print("Device Found!| id: ${device.id}| rssi: ${device.rssi}");
+        print("Device Found!| manufacturerData: ${device.manufacturerData}| name: ${device.name}");
+        print("Device Found!| serviceUuids: ${device.serviceUuids}| serviceData: ${device.serviceData}");
 
         nearbyDevices.remove('noDevice');
         nearbyDevices[device.id] = device.id;
+      });
+
+      _beaconStream = flutterBeacon.ranging(_regions).listen((RangingResult result) {
+        final beacons = result.beacons;
+        if (beacons.isEmpty) {
+          print("Beacon Empty...| result: $result");
+          return;
+        }
+
+        final Beacon beacon = beacons.last;
+        final key = '${beacon.major}-${beacon.minor}';
+        if (nearbyDevices.keys.contains(key)) return;
+
+        print("Beacon Found!| major: ${beacon.major}| minor: ${beacon.minor}");
+
+        nearbyDevices.remove('noDevice');
+        nearbyDevices[key] = key;
       });
 
       nearbyDevices.remove('running');
@@ -129,8 +174,11 @@ class NearbyService {
     nearbyDevices.clear();
     nearbyDevices['stopping'] = Constants.stopping;
     try {
-      _bleStream!.cancel();
+      await _bleStream!.cancel();
       _bleStream = null;
+
+      await _beaconStream!.cancel();
+      _beaconStream = null;
 
       nearbyDevices.clear();
       nearbyDevices['disabledDiscovering'] = Constants.disabledDiscovering;

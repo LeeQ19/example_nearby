@@ -10,7 +10,11 @@ dependencies:
   cupertino_icons: ^1.0.5
   flutter:
     sdk: flutter
+  flutter_beacon: ^0.5.1
+  flutter_ble_peripheral: ^1.1.1
+  flutter_reactive_ble: ^5.0.3
   get: ^4.6.5
+  permission_handler: ^10.2.0
   
   # flutter_nearby_connections: ^1.1.1
   # 20 months ago
@@ -21,15 +25,8 @@ dependencies:
   # flutter_blue_plus: ^1.4.0
   # 49 days ago
   # 
-  flutter_reactive_ble: ^5.0.3
-  # 2 months ago
-  # 
   # ble_reader: ^0.1.1
   # 3 months ago
-  # 
-  flutter_ble_peripheral: ^1.1.1
-  permission_handler: ^10.2.0
-  # 4 months ago
   # 
   # fluetooth: ^0.0.6
   # 24 days ago
